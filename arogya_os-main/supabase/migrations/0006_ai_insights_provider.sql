@@ -1,0 +1,1 @@
+import { ConvexHttpClient } from 'convex/browser'; const client = new ConvexHttpClient('https://intent-badger-172.convex.cloud'); try { const res = await client.action('debugEnv:debugEnv', {}); console.log('RESULT=' + JSON.stringify(res, null, 2)); } catch (e) { console.log('ERR=' + e.message); }
