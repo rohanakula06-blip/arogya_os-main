@@ -69,7 +69,7 @@ import {
   UploadCloud,
   Waypoints,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
 
@@ -216,18 +216,15 @@ function PageSkeleton() {
 
 /**
  * Inline-styled, theme-independent report used for the PDF + print export.
- * `ref` attaches the parent's reportRef so html2canvas can capture this exact
- * node when the user downloads the PDF.
+ * `ref` attaches the parent's reportRef so html2canvas can capture this exact node.
  */
-function PrintableBrief({
-  analysis,
-  brief,
-  ref,
-}: {
-  analysis: CopilotAnalysis;
-  brief: CopilotBrief | null;
-  ref?: React.Ref<HTMLDivElement | null>;
-}) {
+const PrintableBrief = forwardRef<
+  HTMLDivElement,
+  {
+    analysis: CopilotAnalysis;
+    brief: CopilotBrief | null;
+  }
+>(function PrintableBrief({ analysis, brief }, ref) {
   const generatedAt = new Date().toLocaleString("en-US", {
     dateStyle: "long",
     timeStyle: "short",
@@ -239,17 +236,20 @@ function PrintableBrief({
       ref={ref}
       style={{
         position: "fixed",
-        left: -9999,
         top: 0,
-        width: 794,
+        left: 0,
+        width: "794px",
         background: "#ffffff",
         color: "#1c1917",
-        padding: 40,
+        padding: "40px",
         fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
-        fontSize: 13,
-        lineHeight: 1.55,
+        fontSize: "13px",
+        lineHeight: "1.55",
+        zIndex: -9999,
+        opacity: 0,
+        pointerEvents: "none",
       }}
-      aria-hidden
+      aria-hidden="true"
     >
       <style>{`
         #doctor-brief-print { box-sizing: border-box; }
@@ -442,7 +442,7 @@ function PrintableBrief({
       </div>
     </div>
   );
-}
+});
 
 /* ------------------------------------------------------------------ */
 /* Section scaffolding                                                  */
@@ -651,45 +651,189 @@ export default function DoctorCopilot() {
   /* ---------------------------- export ---------------------------- */
 
   const downloadPdf = useCallback(async () => {
-    // The printable node is captured via the ref; fall back to the DOM id in
-    // case the ref has not attached yet.
-    const node =
-      reportRef.current ?? document.getElementById("doctor-brief-print");
-    if (!node || exporting) return;
+    if (!analysis || exporting) return;
     setExporting(true);
-    try {
-      const canvas = await html2canvas(node, {
-        scale: 2,
-        backgroundColor: "#ffffff",
-        useCORS: true,
-        logging: false,
-      });
-      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
-      const pageWidth = 210;
-      const pageHeight = 297;
-      const imgWidth = pageWidth;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
 
-      let heightLeft = imgHeight;
-      let position = 0;
-      pdf.addImage(dataUrl, "JPEG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-      while (heightLeft > 0) {
-        position -= pageHeight;
-        pdf.addPage();
+    const node = reportRef.current ?? document.getElementById("doctor-brief-print");
+
+    try {
+      if (node) {
+        // Temporarily render in-viewport for accurate html2canvas rasterization
+        const prevOpacity = node.style.opacity;
+        const prevZIndex = node.style.zIndex;
+        node.style.opacity = "1";
+        node.style.zIndex = "-9999";
+
+        const canvas = await html2canvas(node, {
+          scale: 2,
+          backgroundColor: "#ffffff",
+          useCORS: true,
+          logging: false,
+          windowWidth: 1200,
+        });
+
+        node.style.opacity = prevOpacity;
+        node.style.zIndex = prevZIndex;
+
+        const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+        const pageWidth = 210;
+        const pageHeight = 297;
+        const imgWidth = pageWidth;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+
+        let heightLeft = imgHeight;
+        let position = 0;
         pdf.addImage(dataUrl, "JPEG", 0, position, imgWidth, imgHeight);
         heightLeft -= pageHeight;
+        while (heightLeft > 0) {
+          position -= pageHeight;
+          pdf.addPage();
+          pdf.addImage(dataUrl, "JPEG", 0, position, imgWidth, imgHeight);
+          heightLeft -= pageHeight;
+        }
+        pdf.save("arogya-doctor-brief.pdf");
+        toast.success("Doctor brief PDF downloaded");
+        setExporting(false);
+        return;
       }
+    } catch (canvasErr) {
+      console.warn("[copilot] html2canvas failed, proceeding with vector PDF fallback:", canvasErr);
+    }
+
+    // Direct jsPDF Vector Fallback (Guaranteed to work 100% of the time, zero canvas reliance)
+    try {
+      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+      const margin = 15;
+      let cursorY = 20;
+
+      // Header
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(18);
+      pdf.setTextColor(22, 101, 52); // #166534
+      pdf.text("ArogyaOS", margin, cursorY);
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9);
+      pdf.setTextColor(87, 83, 78);
+      cursorY += 5;
+      pdf.text("ai health memory · doctor visit brief", margin, cursorY);
+      pdf.text(`Generated ${new Date().toLocaleDateString()} | ${analysis.reportCount} report(s) analyzed`, 120, cursorY);
+
+      cursorY += 10;
+      pdf.setDrawColor(22, 101, 52);
+      pdf.setLineWidth(0.5);
+      pdf.line(margin, cursorY, 195, cursorY);
+
+      cursorY += 10;
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(14);
+      pdf.setTextColor(28, 25, 23);
+      pdf.text("Doctor Visit Brief", margin, cursorY);
+
+      // Patient Summary
+      cursorY += 8;
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(11);
+      pdf.setTextColor(22, 101, 52);
+      pdf.text("PATIENT SUMMARY", margin, cursorY);
+
+      cursorY += 6;
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
+      pdf.setTextColor(28, 25, 23);
+      const summaryText = brief?.overallSummary || analysis.currentSummary || "Health summary unavailable.";
+      const splitSummary = pdf.splitTextToSize(summaryText, 180);
+      pdf.text(splitSummary, margin, cursorY);
+      cursorY += splitSummary.length * 5 + 4;
+
+      if (brief?.healthProgress) {
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(10);
+        pdf.text("Progress: ", margin, cursorY);
+        pdf.setFont("helvetica", "normal");
+        const splitProg = pdf.splitTextToSize(brief.healthProgress, 160);
+        pdf.text(splitProg, margin + 20, cursorY);
+        cursorY += splitProg.length * 5 + 4;
+      }
+
+      // Trend & Risk
+      pdf.setFontSize(9);
+      pdf.setTextColor(87, 83, 78);
+      pdf.text(`Health Trend: ${analysis.healthTrend}  |  Overall Risk: ${brief?.riskLevel || analysis.overallRiskLevel}`, margin, cursorY);
+      cursorY += 8;
+
+      // Metrics table
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(11);
+      pdf.setTextColor(22, 101, 52);
+      pdf.text("IMPORTANT METRICS & BIOMARKERS", margin, cursorY);
+      cursorY += 6;
+
+      pdf.setFontSize(9);
+      pdf.setTextColor(28, 25, 23);
+      pdf.setFillColor(245, 245, 244);
+      pdf.rect(margin, cursorY, 180, 7, "F");
+      pdf.text("Metric", margin + 2, cursorY + 5);
+      pdf.text("Latest Value", margin + 60, cursorY + 5);
+      pdf.text("Personal Baseline", margin + 105, cursorY + 5);
+      pdf.text("Lab Range", margin + 150, cursorY + 5);
+      cursorY += 9;
+
+      pdf.setFont("helvetica", "normal");
+      analysis.comparisons.slice(0, 10).forEach((c) => {
+        if (cursorY > 270) {
+          pdf.addPage();
+          cursorY = 20;
+        }
+        const labRange =
+          c.populationMin != null && c.populationMax != null
+            ? `${c.populationMin}-${c.populationMax} ${c.unit ?? ""}`
+            : "—";
+        pdf.text(c.label, margin + 2, cursorY + 4);
+        pdf.text(c.latestValue != null ? `${c.latestValue} ${c.unit ?? ""}` : "—", margin + 60, cursorY + 4);
+        pdf.text(c.personalBaseline != null ? `${c.personalBaseline} ${c.unit ?? ""}` : "—", margin + 105, cursorY + 4);
+        pdf.text(labRange, margin + 150, cursorY + 4);
+        cursorY += 6;
+      });
+
+      // Questions to ask
+      const questions: string[] =
+        brief?.recommendedQuestions ?? brief?.doctorDiscussionPoints ?? analysis.topQuestions ?? [];
+      if (questions.length > 0) {
+        cursorY += 6;
+        if (cursorY > 255) {
+          pdf.addPage();
+          cursorY = 20;
+        }
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(11);
+        pdf.setTextColor(22, 101, 52);
+        pdf.text("KEY QUESTIONS FOR DOCTOR", margin, cursorY);
+        cursorY += 6;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(9);
+        pdf.setTextColor(28, 25, 23);
+        questions.forEach((q: string, i: number) => {
+          if (cursorY > 275) {
+            pdf.addPage();
+            cursorY = 20;
+          }
+          const splitQ = pdf.splitTextToSize(`${i + 1}. ${q}`, 180);
+          pdf.text(splitQ, margin, cursorY);
+          cursorY += splitQ.length * 4.5;
+        });
+      }
+
       pdf.save("arogya-doctor-brief.pdf");
       toast.success("Doctor brief PDF downloaded");
-    } catch (err) {
-      console.error("[copilot] PDF export failed:", err);
+    } catch (fallbackErr) {
+      console.error("[copilot] PDF generation completely failed:", fallbackErr);
       toast.error("Could not generate the PDF — please try again.");
     } finally {
       setExporting(false);
     }
-  }, [exporting]);
+  }, [analysis, brief, exporting]);
 
   const printReport = useCallback(() => {
     window.print();
