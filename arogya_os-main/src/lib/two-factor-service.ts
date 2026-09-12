@@ -83,7 +83,9 @@ export async function sendTwoFactorPhoneOtp(phone: string): Promise<SendPhoneOtp
 
   let providerUsed = "Local Mode";
   let serverMessage = "";
+  let smsDelivered = false;
 
+  // 1. Try local dev server endpoint if running
   try {
     const res = await fetch("/api/send-phone-otp", {
       method: "POST",
@@ -92,19 +94,43 @@ export async function sendTwoFactorPhoneOtp(phone: string): Promise<SendPhoneOtp
     });
 
     if (res.ok) {
-      const data = await res.json();
-      if (data.success) {
+      const data = await res.json().catch(() => ({}));
+      if (data && data.success) {
         providerUsed = data.provider || "2Factor.in";
         serverMessage = `A 6-digit SMS code was dispatched to +91 ${cleanPhone.slice(-10)}.`;
+        smsDelivered = true;
       }
     }
   } catch (err) {
     console.warn("[ArogyaOS 2Factor Client Warning]", err);
   }
 
+  // 2. Direct client-side dispatch via 2Factor REST API (Firebase / Production static hosting)
+  if (!smsDelivered) {
+    const cfg = getActiveTwoFactorConfig();
+    const apiKey = (cfg.apiKey || "ab2a1f18-962a-11f1-9cb1-0200cd936042").trim();
+    if (apiKey) {
+      try {
+        const targetUrl = `https://2factor.in/API/V1/${encodeURIComponent(apiKey)}/SMS/${cleanPhone}/${encodeURIComponent(otp)}/ArogyaOS`;
+        const directRes = await fetch(targetUrl, { mode: "cors" });
+        if (directRes.ok) {
+          const directData = await directRes.json().catch(() => ({}));
+          console.info("[ArogyaOS Direct 2Factor Dispatch]", directData);
+          providerUsed = "2Factor Live SMS Gateway";
+          serverMessage = `A 6-digit SMS code was sent directly to +91 ${cleanPhone.slice(-10)}.`;
+          smsDelivered = true;
+        }
+      } catch (directErr) {
+        console.warn("[ArogyaOS Direct 2Factor Call Notice]", directErr);
+      }
+    }
+  }
+
   return {
     ok: true,
-    message: serverMessage || `A 6-digit verification code has been sent to +91 ${cleanPhone.slice(-10)}.`,
+    message:
+      serverMessage ||
+      `Security OTP code (${otp}) prepared for +91 ${cleanPhone.slice(-10)}.`,
     debugOtp: otp,
     provider: providerUsed,
   };

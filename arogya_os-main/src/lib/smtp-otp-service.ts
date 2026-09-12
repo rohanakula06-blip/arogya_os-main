@@ -100,7 +100,7 @@ export async function sendOtpToEmail(email: string, fullName?: string): Promise<
   let smtpDelivered = false;
   let serverMessage = "";
 
-  // 1. Dispatch real live email via /api/send-otp-email (Nodemailer Gmail SMTP Plugin)
+  // 1. Dispatch real live email via /api/send-otp-email (Nodemailer Gmail SMTP Plugin when running local/preview server)
   try {
     const response = await fetch("/api/send-otp-email", {
       method: "POST",
@@ -113,27 +113,37 @@ export async function sendOtpToEmail(email: string, fullName?: string): Promise<
     });
 
     if (response.ok) {
-      const data = await response.json();
-      if (data.success) {
+      const data = await response.json().catch(() => ({}));
+      if (data && data.success) {
         smtpDelivered = true;
         serverMessage = `A 6-digit security OTP was sent to ${cleanEmail}. Please check your Gmail/inbox.`;
       }
-    } else {
-      const errData = await response.json().catch(() => ({}));
-      console.warn("[ArogyaOS SMTP Relay Warning]", errData);
-      if (errData?.error) {
-        serverMessage = `OTP generated for ${cleanEmail}. (Local Mode)`;
-      }
     }
   } catch (relayErr) {
-    console.warn("[ArogyaOS SMTP Server Not Reachable]", relayErr);
+    console.warn("[ArogyaOS Local SMTP Relay Notice]", relayErr);
+  }
+
+  // 2. If running on Supabase / Cloud environment, sync OTP request with Supabase Auth
+  if (!smtpDelivered && isSupabaseConfigured) {
+    try {
+      const supabase = getSupabase();
+      await supabase.auth.signInWithOtp({
+        email: cleanEmail,
+        options: {
+          shouldCreateUser: true,
+          data: { full_name: fullName || "Valued User" },
+        },
+      });
+    } catch (supOtpErr) {
+      console.warn("[ArogyaOS Supabase Auth OTP Notice]", supOtpErr);
+    }
   }
 
   return {
     ok: true,
     message:
       serverMessage ||
-      `A 6-digit security OTP has been dispatched to ${cleanEmail}. Please check your inbox and spam folder.`,
+      `Security code (${otp}) generated for ${cleanEmail}. Enter code to continue.`,
     debugOtp: otp,
     smtpUsed: smtpDelivered || isSmtpConfigured(),
   };

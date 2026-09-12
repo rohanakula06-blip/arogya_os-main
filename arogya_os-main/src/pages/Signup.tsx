@@ -97,6 +97,7 @@ export default function Signup() {
 
   // OTP State
   const [otpDigits, setOtpDigits] = useState(["", "", "", "", "", ""]);
+  const [activeOtp, setActiveOtp] = useState<string>("");
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
@@ -145,6 +146,7 @@ export default function Signup() {
       setEmail(values.email);
       setStep("enter-otp");
       setOtpDigits(["", "", "", "", "", ""]);
+      if (res.debugOtp) setActiveOtp(res.debugOtp);
       setResendTimer(60);
 
       toast.success("Security OTP Dispatched", {
@@ -169,6 +171,7 @@ export default function Signup() {
       setPhone(values.phone);
       setStep("enter-otp");
       setOtpDigits(["", "", "", "", "", ""]);
+      if (res.debugOtp) setActiveOtp(res.debugOtp);
       setResendTimer(60);
 
       toast.success("SMS OTP Dispatched", {
@@ -194,10 +197,12 @@ export default function Signup() {
     try {
       if (channel === "email") {
         const res = await sendOtpToEmail(email, fullName);
+        if (res.debugOtp) setActiveOtp(res.debugOtp);
         setResendTimer(60);
         toast.success(`Fresh OTP sent to ${email}`, { description: res.message });
       } else {
         const res = await sendTwoFactorPhoneOtp(phone);
+        if (res.debugOtp) setActiveOtp(res.debugOtp);
         setResendTimer(60);
         toast.success(`Fresh SMS OTP sent to +91 ${phone.replace(/\D/g, "").slice(-10)}`, {
           description: res.message,
@@ -546,6 +551,28 @@ export default function Signup() {
                   />
                 ))}
               </div>
+
+              {activeOtp && (
+                <div className="flex items-center justify-between rounded-xl border border-primary/30 bg-primary/10 px-3.5 py-2 text-xs text-foreground animate-in fade-in duration-300">
+                  <div className="flex items-center gap-2">
+                    <span className="flex size-2 rounded-full bg-primary animate-pulse" />
+                    <span className="font-mono text-[11px] text-muted-foreground">
+                      Security Code: <strong className="font-mono text-primary text-xs tracking-wider">{activeOtp}</strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const digits = activeOtp.split("").slice(0, 6);
+                      setOtpDigits(digits);
+                      otpInputRefs.current[5]?.focus();
+                    }}
+                    className="cursor-pointer text-[11px] font-mono font-semibold text-primary hover:underline"
+                  >
+                    Auto-fill ⚡
+                  </button>
+                </div>
+              )}
 
               <div className="flex items-center justify-between text-xs font-mono text-muted-foreground pt-1">
                 <span>Expires in 10 mins</span>
